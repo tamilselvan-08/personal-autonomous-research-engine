@@ -2,7 +2,7 @@
 
 PARE turns a research question written in plain language into a reviewed plan, then collects, verifies and organises the answer from public sources, with a source for every value.
 
-**This release is the base application (Phase 1 of [the PRD](docs/PRD.md)).** It provides accounts, projects, research-task management, the dashboard, settings and health monitoring. Planning, AI providers, web research and browser automation are **not implemented yet**; their screens are labelled *Coming soon* and have no controls.
+**This release covers Phases 1–2 of [the PRD](docs/PRD.md):** accounts, projects, research-task management, the dashboard, settings and health monitoring, and **AI provider management** — encrypted API keys, connection tests, models, primary/fallback routing, health and usage ([details](docs/AI_PROVIDERS.md)). Research planning, web research and browser automation are **not implemented yet**; their screens are labelled *Coming soon* and have no controls.
 
 | | |
 |---|---|
@@ -47,7 +47,9 @@ Cloning to a normal Windows folder (e.g. `C:\dev\pare`) also works; hot reload i
 powershell -ExecutionPolicy Bypass -File scripts\setup-env.ps1
 ```
 
-(or `sh scripts/setup-env.sh` inside WSL). This copies `.env.example` to `.env` and fills in random `POSTGRES_PASSWORD` and `JWT_SECRET` values. Never commit `.env`.
+(or `sh scripts/setup-env.sh` inside WSL). This copies `.env.example` to `.env` and fills in random `POSTGRES_PASSWORD`, `JWT_SECRET` and `SECRETS_MASTER_KEY` values. Never commit `.env`.
+
+**Upgrading from the base release?** Run the same script again: it leaves your existing values alone and only adds `SECRETS_MASTER_KEY`, which encrypts AI provider API keys (`scripts\start.ps1` does this automatically).
 
 ### 4. Start
 
@@ -147,25 +149,29 @@ pare/
 ├── apps/
 │   ├── api/                       FastAPI backend (Python 3.12)
 │   │   ├── app/
+│   │   │   ├── ai/                provider adapters, registry, router (retries/fallback), usage recorder
 │   │   │   ├── api/               routers (v1) and request dependencies (auth, pagination)
 │   │   │   ├── core/              config, DB session, security, errors, logging, middleware
 │   │   │   ├── domain/            pure business rules (task state machine)
 │   │   │   ├── models/            SQLAlchemy models
 │   │   │   ├── repositories/      query building where it is non-trivial (task listing)
 │   │   │   ├── schemas/           Pydantic request/response models
-│   │   │   ├── services/          business logic; route handlers stay thin
+│   │   │   ├── services/          business logic; route handlers stay thin (ai_service = AI façade)
+│   │   │   ├── cli.py             maintenance commands (master-key generation/rotation/check)
 │   │   │   └── main.py            application factory
 │   │   ├── alembic/               migrations
 │   │   └── tests/                 pytest suite (real PostgreSQL)
 │   └── web/                       Next.js 16 frontend (TypeScript, Tailwind v4, shadcn-style UI)
 │       ├── app/                   routes: (auth)/login, (auth)/register, (app)/…
 │       ├── components/            ui/ primitives and layout/ (shell, page header, placeholders)
-│       ├── features/              tasks/, projects/, auth/ — feature components and hooks
+│       ├── features/              tasks/, projects/, auth/, ai-providers/ — feature components and hooks
 │       ├── hooks/                 shared hooks (auth, debounce)
 │       ├── lib/                   API client, endpoint functions, status metadata, utils
 │       └── types/                 API types mirroring backend schemas
 ├── infrastructure/docker/         Dockerfiles for api and web
 ├── docs/PRD.md                    product requirements (source of truth)
+├── docs/AI_PROVIDERS.md           provider architecture, routing, security, key rotation
+├── tools/stub-llm/                OpenAI-compatible stub server for manual testing without keys
 ├── scripts/                       setup-env, start, stop, doctor (PowerShell) + setup-env.sh
 ├── docker-compose.yml             production-like local stack
 ├── docker-compose.dev.yml         hot-reload override
@@ -191,12 +197,13 @@ pare/
 | Projects | `GET/POST /projects`, `GET/PATCH/DELETE /projects/{id}` (`?detach_tasks=true` to delete a project that has tasks) |
 | Research tasks | `GET/POST /tasks` (search `q`, filter `status` (repeatable) and `project_id`, `sort`, pagination), `GET/PATCH/DELETE /tasks/{id}`, `GET /tasks/{id}/status`, `GET /tasks/stats`, `GET /tasks/recent-activity` |
 | Settings | `GET /settings` — version, environment, database version and migration revision, feature availability |
+| AI providers | `GET /providers/types`, `GET/POST /providers`, `GET/PATCH/DELETE /providers/{id}`, `PUT/DELETE /providers/{id}/key`, `POST /providers/{id}/test`, `GET /providers/{id}/available-models`, `GET/POST /providers/{id}/models`, `PATCH/DELETE /models/{id}`, `GET /model-routes`, `PUT /model-routes/{role}`, `POST /model-routes/{role}/test`, `GET/PUT /routing-policy`, `GET /providers/health`, `GET /usage`, `GET /usage/records` — see [docs/AI_PROVIDERS.md](docs/AI_PROVIDERS.md) |
 
 All errors use one envelope: `{"error": {"code", "message", "details", "request_id"}}`.
 
-**Database tables:** `users`, `projects`, `research_tasks`, `audit_events` (plus `alembic_version`). UUID keys, timezone-aware timestamps, foreign keys with explicit delete rules, case-insensitive unique email and per-user unique project names, and indexes for the list queries.
+**Database tables:** `users`, `projects`, `research_tasks`, `audit_events`, and for AI providers `secrets`, `ai_providers`, `ai_models`, `model_routes`, `ai_routing_policies`, `usage_records` (plus `alembic_version`). UUID keys, timezone-aware timestamps, foreign keys with explicit delete rules, case-insensitive unique email and per-user unique project names, and indexes for the list queries.
 
-**Web screens:** sign in / create account, dashboard (real counts, recent tasks, recent activity, empty state), research list (search, status/project filters, sort, pagination), new task, task detail, edit draft, delete with confirmation, projects list/create/edit/delete, project detail, history (completed/failed/cancelled tasks), settings (theme, backend and database status, system information), AI Providers and Browser Manager (*Coming soon*). Light and dark themes; responsive with a mobile menu.
+**Web screens:** sign in / create account, dashboard (real counts, recent tasks, recent activity, empty state), research list (search, status/project filters, sort, pagination), new task, task detail, edit draft, delete with confirmation, projects list/create/edit/delete, project detail, history (completed/failed/cancelled tasks), settings (theme, backend and database status, system information), AI Providers (add/edit/enable/disable/delete providers, write-only masked keys, models with provider model discovery, connection tests, primary + ordered fallback chain per role, retry/fallback policy, routing test with per-attempt detail, health and usage), and Browser Manager (*Coming soon*). Light and dark themes; responsive with a mobile menu.
 
 ### Security in this release
 
@@ -207,6 +214,16 @@ All errors use one envelope: `{"error": {"code", "message", "details", "request_
 - Every query is scoped to the signed-in user; another user's IDs return 404.
 - Ports are bound to `127.0.0.1` so the app is not reachable from your network.
 - Logs are JSON with request IDs; values that look like secrets are redacted.
+- **AI provider keys** are encrypted with AES-256-GCM envelope encryption under `SECRETS_MASTER_KEY` (kept in `.env`, never in the database), bound to their row and owner, decrypted only for the duration of a call, and never returned by the API — only `••••` plus the last 4 characters. Provider error messages are scrubbed of keys before they are stored or shown.
+
+### Credential encryption
+
+`SECRETS_MASTER_KEY` encrypts every stored API key. Treat it like a password:
+
+- **Back it up separately from the database.** A database backup alone cannot decrypt the keys; the master key alone is useless without the database.
+- **If you lose it**, stored keys can't be recovered: re-enter each provider's key (*AI Providers → ⋯ → Replace API key*). Nothing else is affected.
+- **To rotate it** without re-entering keys, follow [docs/AI_PROVIDERS.md §4](docs/AI_PROVIDERS.md#rotating-the-master-key) (`python -m app.cli rotate-master-key`).
+- Without the key the app still runs; the AI Providers page shows a warning and only keyless local endpoints can be added.
 
 ---
 
@@ -225,13 +242,19 @@ All errors use one envelope: `{"error": {"code", "message", "details", "request_
 | Hot reload doesn't pick up changes (dev stack) | Clone inside WSL, or keep `WATCHPACK_POLLING=true` (already set in the dev override). |
 | `exec ... no such file or directory` for scripts in containers | Line endings were converted to CRLF. Run `git config core.autocrlf false` and re-clone; `.gitattributes` keeps LF for container files. |
 | Docker uses too much memory | Create `%UserProfile%\.wslconfig` with `[wsl2]` / `memory=6GB` / `processors=4`, then `wsl --shutdown`. |
+| AI Providers says "API keys can't be saved yet" | `SECRETS_MASTER_KEY` is missing. Run `scripts\setup-env.ps1`, then `docker compose up -d api`. |
+| A provider shows "credential could not be decrypted" | `SECRETS_MASTER_KEY` changed. Restore the old key (or add it to `SECRETS_PREVIOUS_KEYS`), or replace that provider's key. |
+| An OpenAI-compatible server on your PC is unreachable from Docker | Use `http://host.docker.internal:<port>/v1` as the base URL, not `localhost`. |
 | PowerShell refuses to run scripts | Use `powershell -ExecutionPolicy Bypass -File scripts\start.ps1` as shown, or `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. |
 
 ---
 
 ## Known limitations
 
-- No AI planning, provider configuration, web search, crawling, browser automation, scheduling or exports yet (see the roadmap in `docs/PRD.md` §26).
+- No AI planning, web search, crawling, browser automation, scheduling or exports yet (see the roadmap in `docs/PRD.md` §26).
+- AI provider adapters are tested against mocked provider responses; **none has yet been verified against a live provider API** (run `tests/test_live_providers.py` with your keys — see `docs/AI_PROVIDERS.md` §7).
+- Budgets and spending caps (PRD §17.3) are not enforced yet; usage cost is an estimate and only for models with prices entered.
+- Connection-test rate limiting is in-memory (per API process), like the login limiter.
 - Task statuses beyond `draft` can't be reached through the UI yet; the full state machine exists in `app/domain/task_state.py` for the next phases.
 - The login rate limiter is in-memory, which is correct for the single API process used locally; multi-process deployments need a shared store.
 - No password change or "sign out everywhere" UI yet (the `token_version` column already supports revocation).
