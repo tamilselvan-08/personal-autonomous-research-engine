@@ -17,10 +17,10 @@ from app.schemas.system import (
 
 logger = logging.getLogger(__name__)
 
-# Features that exist in the PRD but are not implemented in this release. The UI uses
-# these flags to show "Coming soon" instead of controls that do nothing.
+# Which PRD features this release implements. The UI uses these flags to show
+# "Coming soon" instead of controls that do nothing.
 FEATURES = FeatureFlags(
-    ai_providers=False,
+    ai_providers=True,
     research_planning=False,
     research_execution=False,
     browser_manager=False,
