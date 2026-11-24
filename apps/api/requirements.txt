@@ -1,0 +1,11 @@
+# Runtime dependencies (pinned). Keep in sync with pyproject.toml.
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+pydantic-settings==2.16.3
+email-validator==2.4.0
+SQLAlchemy==2.1.9
+alembic==1.20.1
+psycopg[binary]==3.3.9
+bcrypt==5.0.0
+PyJWT==2.15.0
