@@ -53,8 +53,10 @@ def test_settings_contents(auth_client) -> None:
     assert body["app_name"] == "PARE"
     assert body["database"]["status"] == "ok"
     assert body["database"]["version"].startswith("PostgreSQL")
-    assert body["database"]["migration_revision"] == "0001"
-    assert all(v is False for v in body["features"].values())
+    assert body["database"]["migration_revision"] == "0002"
+    features = body["features"]
+    assert features.pop("ai_providers") is True
+    assert all(v is False for v in features.values())
     serialized = str(body).lower()
     assert "secret" not in serialized and "password" not in serialized
 

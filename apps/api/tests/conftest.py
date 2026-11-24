@@ -24,6 +24,10 @@ os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
 os.environ["BCRYPT_ROUNDS"] = "4"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["ALLOW_REGISTRATION"] = "true"
+# A fixed test-only key-encryption key (32 zero-padded bytes, never used outside tests).
+os.environ["SECRETS_MASTER_KEY"] = "dGVzdC1vbmx5LWtleS1lbmNyeXB0aW9uLWtleS0zMmI"
+os.environ["SECRETS_MASTER_KEY_ID"] = "test1"
+os.environ.pop("SECRETS_PREVIOUS_KEYS", None)
 
 from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -31,7 +35,18 @@ from fastapi.testclient import TestClient  # noqa: E402
 from alembic import command  # noqa: E402
 
 API_ROOT = Path(__file__).resolve().parents[1]
-TABLES = ["audit_events", "research_tasks", "projects", "users"]
+TABLES = [
+    "usage_records",
+    "model_routes",
+    "ai_routing_policies",
+    "ai_models",
+    "ai_providers",
+    "secrets",
+    "audit_events",
+    "research_tasks",
+    "projects",
+    "users",
+]
 
 
 def _ensure_database(url: str) -> None:
@@ -71,6 +86,10 @@ def _clean_tables() -> Iterator[None]:
 
     if auth_routes._login_limiter is not None:
         auth_routes._login_limiter.reset()
+    from app.api.v1.routes import ai_providers as ai_routes
+
+    if ai_routes._test_limiter is not None:
+        ai_routes._test_limiter.reset()
 
 
 @pytest.fixture
