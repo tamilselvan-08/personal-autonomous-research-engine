@@ -17,7 +17,8 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-if (-not (Test-Path ".env")) { & "$PSScriptRoot\setup-env.ps1" }
+# Creates .env on first run; on later runs only adds settings new releases need.
+& "$PSScriptRoot\setup-env.ps1"
 
 $files = @("-f", "docker-compose.yml")
 if ($Dev) { $files += @("-f", "docker-compose.dev.yml") }

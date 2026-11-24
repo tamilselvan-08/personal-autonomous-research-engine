@@ -27,3 +27,9 @@ next-env.d.ts
 Thumbs.db
 .vscode/
 .idea/
+
+# Local scratch (e.g. a throwaway test PostgreSQL cluster)
+.tmp/
+
+# Local launch helpers (point at .tmp scripts with local secrets)
+.claude/launch.json

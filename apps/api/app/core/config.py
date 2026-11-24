@@ -8,10 +8,10 @@ import json
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 _PLACEHOLDER_SECRETS = {"change-me", "changeme", "replace-me", "CHANGE_ME_TO_A_LONG_RANDOM_STRING"}
 
@@ -53,6 +53,19 @@ class Settings(BaseSettings):
 
     allow_registration: bool = True
     login_rate_limit_per_minute: int = Field(default=10, ge=1)
+
+    # --- Credential encryption (AI provider API keys) -------------------------------
+    # Key-encryption key (KEK): 32 random bytes, base64/base64url encoded. Kept only in the
+    # environment, never in the database. Without it, provider features are unavailable.
+    secrets_master_key: SecretStr | None = None
+    secrets_master_key_id: str = Field(default="k1", pattern=r"^[A-Za-z0-9_\-]{1,32}$")
+    # Previous KEKs kept for decryption during rotation: "k1:<base64>,k0:<base64>".
+    secrets_previous_keys: SecretStr | None = None
+
+    # --- AI provider calls ------------------------------------------------------------
+    ai_request_timeout_seconds: float = Field(default=60.0, ge=1, le=600)
+    ai_connection_test_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
+    ai_connection_test_rate_limit_per_minute: int = Field(default=6, ge=1)
 
     public_api_base_url: str = "http://localhost:8000"
     default_timezone: str = "UTC"
