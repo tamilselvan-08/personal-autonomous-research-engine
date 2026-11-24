@@ -138,6 +138,259 @@ export interface FieldError {
   type: string;
 }
 
+// --- AI providers (apps/api/app/schemas/ai.py) ----------------------------------------
+
+export const PROVIDER_TYPES = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "xai",
+  "deepseek",
+  "mistral",
+  "openai_compatible",
+] as const;
+export type ProviderType = (typeof PROVIDER_TYPES)[number];
+
+export const MODEL_ROLES = ["default", "planner", "extractor", "verifier", "summarizer"] as const;
+export type ModelRole = (typeof MODEL_ROLES)[number];
+
+export type HealthState =
+  | "unknown"
+  | "healthy"
+  | "degraded"
+  | "down"
+  | "invalid_credentials"
+  | "quota_exhausted"
+  | "misconfigured";
+
+export interface ProviderTypeInfo {
+  type: ProviderType;
+  label: string;
+  protocol: string;
+  default_base_url: string | null;
+  requires_base_url: boolean;
+  api_key_required: boolean;
+  allow_http: boolean;
+  key_hint: string;
+  docs_url: string | null;
+  model_examples: string[];
+  verification: "mocked" | "live";
+}
+
+export interface ProviderTypes {
+  encryption_configured: boolean;
+  types: ProviderTypeInfo[];
+}
+
+export interface AIModel {
+  id: string;
+  provider_id: string;
+  model_identifier: string;
+  display_name: string | null;
+  context_window: number | null;
+  input_price_per_mtok: string | null;
+  output_price_per_mtok: string | null;
+  supports_json: boolean;
+  enabled: boolean;
+  health_state: HealthState;
+  last_error_class: string | null;
+  last_error_message: string | null;
+  last_error_at: string | null;
+  last_success_at: string | null;
+  circuit_open: boolean;
+  route_roles: ModelRole[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIProvider {
+  id: string;
+  provider_type: ProviderType;
+  provider_label: string;
+  display_name: string;
+  base_url: string | null;
+  effective_base_url: string;
+  enabled: boolean;
+  has_key: boolean;
+  key_masked: string | null;
+  key_updated_at: string | null;
+  health_state: HealthState;
+  consecutive_failures: number;
+  last_error_class: string | null;
+  last_error_message: string | null;
+  last_error_at: string | null;
+  last_success_at: string | null;
+  last_tested_at: string | null;
+  verification: "mocked" | "live";
+  models: AIModel[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelInput {
+  model_identifier: string;
+  display_name?: string | null;
+  context_window?: number | null;
+  input_price_per_mtok?: string | null;
+  output_price_per_mtok?: string | null;
+  supports_json?: boolean;
+  enabled?: boolean;
+}
+
+export interface ProviderCreateInput {
+  provider_type: ProviderType;
+  display_name: string;
+  api_key?: string;
+  base_url?: string | null;
+  models: ModelInput[];
+}
+
+export interface ProviderUpdateInput {
+  display_name?: string;
+  base_url?: string | null;
+  enabled?: boolean;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  provider_id: string;
+  model_identifier: string;
+  latency_ms: number;
+  error_class: string | null;
+  error_hint: string | null;
+  message: string;
+  http_status: number | null;
+  health_state: HealthState;
+  tested_at: string;
+}
+
+export interface DiscoveredModel {
+  id: string;
+  display_name: string | null;
+  context_window: number | null;
+  configured: boolean;
+}
+
+export interface DiscoveredModels {
+  ok: boolean;
+  models: DiscoveredModel[];
+  error_class: string | null;
+  message: string | null;
+}
+
+export interface RouteEntry {
+  position: number;
+  model_id: string;
+  model_identifier: string;
+  model_display_name: string | null;
+  provider_id: string;
+  provider_name: string;
+  provider_type: ProviderType;
+  available: boolean;
+  unavailable_reason: string | null;
+  health_state: HealthState;
+}
+
+export interface RoleRoute {
+  role: ModelRole;
+  uses_default: boolean;
+  entries: RouteEntry[];
+}
+
+export interface RoutingPolicy {
+  max_retries: number;
+  max_retry_after_seconds: number;
+  fallback_on_rate_limit: boolean;
+  fallback_on_quota_exhausted: boolean;
+}
+
+export interface RoutingAttempt {
+  provider_name: string;
+  model_identifier: string;
+  model_id: string | null;
+  outcome: "success" | "retry" | "fallback" | "error" | "skipped";
+  attempt: number | null;
+  error_class: string | null;
+  message: string | null;
+  http_status: number | null;
+  latency_ms: number | null;
+}
+
+export interface RoutingTestResult {
+  ok: boolean;
+  role: ModelRole;
+  provider_name: string | null;
+  model_identifier: string | null;
+  latency_ms: number | null;
+  used_fallback: boolean;
+  error_code: string | null;
+  error_class: string | null;
+  message: string | null;
+  attempts: RoutingAttempt[];
+}
+
+export interface ProviderHealth {
+  provider_id: string;
+  display_name: string;
+  provider_type: ProviderType;
+  enabled: boolean;
+  health_state: HealthState;
+  last_error_class: string | null;
+  last_error_message: string | null;
+  last_error_at: string | null;
+  last_success_at: string | null;
+  last_tested_at: string | null;
+  window_hours: number;
+  calls: number;
+  successes: number;
+  failures: number;
+  success_rate: number | null;
+  p50_latency_ms: number | null;
+  p95_latency_ms: number | null;
+}
+
+export interface UsageRow {
+  key: string;
+  label: string;
+  calls: number;
+  successes: number;
+  failures: number;
+  input_tokens: number;
+  output_tokens: number;
+  est_cost_usd: string | null;
+  avg_latency_ms: number | null;
+}
+
+export type UsageGroupBy = "provider" | "model" | "day" | "purpose" | "outcome";
+
+export interface UsageSummary {
+  date_from: string;
+  date_to: string;
+  group_by: UsageGroupBy;
+  rows: UsageRow[];
+  totals: UsageRow;
+}
+
+export interface UsageRecord {
+  id: string;
+  created_at: string;
+  call_id: string;
+  provider_id: string | null;
+  provider_name: string;
+  provider_type: string;
+  model_identifier: string;
+  role: string;
+  purpose: string;
+  attempt: number;
+  outcome: string;
+  error_class: string | null;
+  http_status: number | null;
+  latency_ms: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  est_cost_usd: string | null;
+}
+
 export interface ErrorEnvelope {
   error: {
     code: string;

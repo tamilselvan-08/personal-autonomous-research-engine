@@ -29,7 +29,7 @@ export const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Configuration",
     items: [
-      { href: "/ai-providers", label: "AI Providers", icon: Bot, comingSoon: true },
+      { href: "/ai-providers", label: "AI Providers", icon: Bot },
       { href: "/browser-manager", label: "Browser Manager", icon: Globe, comingSoon: true },
       { href: "/settings", label: "Settings", icon: Settings },
     ],

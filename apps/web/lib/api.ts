@@ -1,7 +1,23 @@
 import { apiRequest } from "@/lib/api-client";
 import type {
   Activity,
+  AIModel,
+  AIProvider,
   AppSettings,
+  ConnectionTestResult,
+  DiscoveredModels,
+  ModelInput,
+  ModelRole,
+  ProviderCreateInput,
+  ProviderHealth,
+  ProviderTypes,
+  ProviderUpdateInput,
+  RoleRoute,
+  RoutingPolicy,
+  RoutingTestResult,
+  UsageGroupBy,
+  UsageRecord,
+  UsageSummary,
   LoginResponse,
   Page,
   Project,
@@ -74,6 +90,52 @@ export const api = {
         query: { detach_tasks: detachTasks || undefined },
       }),
   },
+  ai: {
+    types: () => apiRequest<ProviderTypes>("/providers/types"),
+    providers: () => apiRequest<AIProvider[]>("/providers"),
+    createProvider: (input: ProviderCreateInput) =>
+      apiRequest<AIProvider>("/providers", { method: "POST", body: input }),
+    updateProvider: (id: string, input: ProviderUpdateInput) =>
+      apiRequest<AIProvider>(`/providers/${id}`, { method: "PATCH", body: input }),
+    deleteProvider: (id: string, force = false) =>
+      apiRequest<void>(`/providers/${id}`, {
+        method: "DELETE",
+        query: { force: force || undefined },
+      }),
+    replaceKey: (id: string, apiKey: string) =>
+      apiRequest<AIProvider>(`/providers/${id}/key`, { method: "PUT", body: { api_key: apiKey } }),
+    removeKey: (id: string) => apiRequest<AIProvider>(`/providers/${id}/key`, { method: "DELETE" }),
+    testConnection: (id: string, modelId?: string) =>
+      apiRequest<ConnectionTestResult>(`/providers/${id}/test`, {
+        method: "POST",
+        body: modelId ? { model_id: modelId } : {},
+      }),
+    availableModels: (id: string) =>
+      apiRequest<DiscoveredModels>(`/providers/${id}/available-models`),
+    addModel: (providerId: string, input: ModelInput) =>
+      apiRequest<AIModel>(`/providers/${providerId}/models`, { method: "POST", body: input }),
+    updateModel: (id: string, input: Partial<ModelInput>) =>
+      apiRequest<AIModel>(`/models/${id}`, { method: "PATCH", body: input }),
+    deleteModel: (id: string, force = false) =>
+      apiRequest<void>(`/models/${id}`, { method: "DELETE", query: { force: force || undefined } }),
+    routes: () => apiRequest<{ roles: RoleRoute[] }>("/model-routes"),
+    setRoute: (role: ModelRole, modelIds: string[]) =>
+      apiRequest<{ roles: RoleRoute[] }>(`/model-routes/${role}`, {
+        method: "PUT",
+        body: { model_ids: modelIds },
+      }),
+    testRoute: (role: ModelRole) =>
+      apiRequest<RoutingTestResult>(`/model-routes/${role}/test`, { method: "POST" }),
+    policy: () => apiRequest<RoutingPolicy>("/routing-policy"),
+    updatePolicy: (input: Partial<RoutingPolicy>) =>
+      apiRequest<RoutingPolicy>("/routing-policy", { method: "PUT", body: input }),
+    health: () =>
+      apiRequest<{ window_hours: number; providers: ProviderHealth[] }>("/providers/health"),
+    usage: (groupBy: UsageGroupBy = "provider") =>
+      apiRequest<UsageSummary>("/usage", { query: { group_by: groupBy } }),
+    usageRecords: (pageSize = 20) =>
+      apiRequest<Page<UsageRecord>>("/usage/records", { query: { page_size: pageSize } }),
+  },
   system: {
     ready: () => apiRequest<Readiness>("/health/ready"),
     settings: () => apiRequest<AppSettings>("/settings"),
@@ -90,6 +152,14 @@ export const queryKeys = {
   projects: ["projects"] as const,
   projectList: (p: object) => ["projects", "list", p] as const,
   project: (id: string) => ["projects", "detail", id] as const,
+  ai: ["ai"] as const,
+  aiTypes: ["ai", "types"] as const,
+  aiProviders: ["ai", "providers"] as const,
+  aiRoutes: ["ai", "routes"] as const,
+  aiPolicy: ["ai", "policy"] as const,
+  aiHealth: ["ai", "health"] as const,
+  aiUsage: (groupBy: string) => ["ai", "usage", groupBy] as const,
+  aiUsageRecords: ["ai", "usage-records"] as const,
   ready: ["system", "ready"] as const,
   settings: ["system", "settings"] as const,
 };
