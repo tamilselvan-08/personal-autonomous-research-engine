@@ -12,6 +12,14 @@ if config.config_file_name is not None:
 
 database_url = os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
 if not database_url:
+    # Outside Docker the URL usually lives in apps/api/.env; the app settings read it.
+    try:
+        from app.core.config import get_settings
+
+        database_url = get_settings().database_url
+    except Exception:  # missing/invalid settings: fall through to the clear error below
+        database_url = None
+if not database_url:
     raise RuntimeError("DATABASE_URL is not set; cannot run migrations.")
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
