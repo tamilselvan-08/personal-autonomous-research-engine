@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
-from app.models.enums import ModelRole, ProviderType
+from app.models.enums import ModelCapability, ModelRole, ProviderType
 from app.schemas.common import strip_or_none
 
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,199}$")
@@ -82,12 +82,29 @@ class ModelFields(BaseModel):
     input_price_per_mtok: Decimal | None = Field(default=None, ge=0, le=100_000, decimal_places=6)
     output_price_per_mtok: Decimal | None = Field(default=None, ge=0, le=100_000, decimal_places=6)
     supports_json: bool | None = None
+    # Replaces the whole set. 'json' here is the same flag as supports_json.
+    capabilities: list[ModelCapability] | None = Field(default=None, max_length=10)
     enabled: bool | None = None
 
     @field_validator("display_name")
     @classmethod
     def _dn(cls, value: str | None) -> str | None:
         return strip_or_none(value)
+
+    @field_validator("capabilities")
+    @classmethod
+    def _caps(cls, value: list[ModelCapability] | None) -> list[ModelCapability] | None:
+        return None if value is None else sorted(set(value))
+
+    @model_validator(mode="after")
+    def _json_agrees(self) -> "ModelFields":
+        if (
+            self.capabilities is not None
+            and self.supports_json is not None
+            and (ModelCapability.JSON in self.capabilities) != self.supports_json
+        ):
+            raise ValueError("supports_json and the 'json' capability disagree; send one of them.")
+        return self
 
 
 class ModelCreate(ModelFields):
@@ -103,6 +120,12 @@ class ModelUpdate(ModelFields):
     pass
 
 
+class ModelCreateForProvider(ModelCreate):
+    """POST /models: the provider is named in the body instead of the path."""
+
+    provider_id: uuid.UUID
+
+
 class ModelOut(BaseModel):
     id: uuid.UUID
     provider_id: uuid.UUID
@@ -112,6 +135,7 @@ class ModelOut(BaseModel):
     input_price_per_mtok: Decimal | None
     output_price_per_mtok: Decimal | None
     supports_json: bool
+    capabilities: list[ModelCapability]
     enabled: bool
     health_state: str
     last_error_class: str | None
@@ -199,6 +223,8 @@ class ProviderOut(BaseModel):
     key_masked: str | None
     key_updated_at: datetime | None
     health_state: str
+    # Simplified status for display: connected / failing / not_tested / disabled.
+    connection_status: Literal["connected", "failing", "not_tested", "disabled"]
     consecutive_failures: int
     last_error_class: str | None
     last_error_message: str | None
@@ -301,6 +327,36 @@ class RoutingPolicyUpdate(BaseModel):
     max_retry_after_seconds: int | None = Field(default=None, ge=0, le=120)
     fallback_on_rate_limit: bool | None = None
     fallback_on_quota_exhausted: bool | None = None
+
+
+class ModelRoutingOut(BaseModel):
+    """Everything that decides which model answers: chains per role and the policy."""
+
+    roles: list[RoleRouteOut]
+    policy: RoutingPolicyOut
+
+
+class ModelRoutingUpdate(BaseModel):
+    """Set several roles' chains and/or the policy in one transaction.
+
+    Roles that are not listed keep their chain; an empty list removes a role's own chain
+    (it then uses the default chain).
+    """
+
+    routes: dict[ModelRole, list[uuid.UUID]] = Field(default_factory=dict)
+    policy: RoutingPolicyUpdate | None = None
+
+    @field_validator("routes")
+    @classmethod
+    def _chains(cls, value: dict[ModelRole, list[uuid.UUID]]) -> dict[ModelRole, list[uuid.UUID]]:
+        for role, ids in value.items():
+            if len(ids) > MAX_CHAIN_LENGTH:
+                raise ValueError(
+                    f"The {role.value} chain can have at most {MAX_CHAIN_LENGTH} models."
+                )
+            if len(ids) != len(set(ids)):
+                raise ValueError(f"A model can appear only once in the {role.value} chain.")
+        return value
 
 
 class AttemptOut(BaseModel):

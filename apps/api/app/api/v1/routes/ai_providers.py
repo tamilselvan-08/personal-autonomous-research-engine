@@ -22,7 +22,10 @@ from app.schemas.ai import (
     HealthSummaryOut,
     KeyReplace,
     ModelCreate,
+    ModelCreateForProvider,
     ModelOut,
+    ModelRoutingOut,
+    ModelRoutingUpdate,
     ModelUpdate,
     ProviderCreate,
     ProviderOut,
@@ -119,6 +122,12 @@ def get_provider(provider_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Pr
     return provider_service.get_provider(db, user.id, provider_id)
 
 
+@router.put(
+    "/providers/{provider_id}",
+    response_model=ProviderOut,
+    responses={409: {"model": ErrorResponse}},
+    summary="Update a provider (same partial-update body as PATCH)",
+)
 @router.patch(
     "/providers/{provider_id}",
     response_model=ProviderOut,
@@ -129,6 +138,22 @@ def update_provider(
     provider_id: uuid.UUID, data: ProviderUpdate, user: CurrentUser, db: DbSession
 ) -> ProviderOut:
     return provider_service.update_provider(db, user.id, provider_id, data)
+
+
+@router.post(
+    "/providers/{provider_id}/enable", response_model=ProviderOut, summary="Enable a provider"
+)
+def enable_provider(provider_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ProviderOut:
+    return provider_service.set_provider_enabled(db, user.id, provider_id, True)
+
+
+@router.post(
+    "/providers/{provider_id}/disable",
+    response_model=ProviderOut,
+    summary="Disable a provider (its models are skipped by routing)",
+)
+def disable_provider(provider_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ProviderOut:
+    return provider_service.set_provider_enabled(db, user.id, provider_id, False)
 
 
 @router.delete(
@@ -236,6 +261,29 @@ def add_model(
     return provider_service.add_model(db, user.id, provider_id, data)
 
 
+@router.get("/models", response_model=list[ModelOut], summary="List all configured models")
+def list_all_models(
+    user: CurrentUser, db: DbSession, provider_id: uuid.UUID | None = None
+) -> list[ModelOut]:
+    return provider_service.list_all_models(db, user.id, provider_id)
+
+
+@router.post(
+    "/models",
+    response_model=ModelOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={409: {"model": ErrorResponse}},
+    summary="Add a model (provider_id in the body)",
+)
+def create_model(data: ModelCreateForProvider, user: CurrentUser, db: DbSession) -> ModelOut:
+    return provider_service.add_model_for_provider(db, user.id, data)
+
+
+@router.put(
+    "/models/{model_id}",
+    response_model=ModelOut,
+    summary="Update a model (same partial-update body as PATCH)",
+)
 @router.patch("/models/{model_id}", response_model=ModelOut, summary="Update a model")
 def update_model(
     model_id: uuid.UUID, data: ModelUpdate, user: CurrentUser, db: DbSession
@@ -291,6 +339,26 @@ def test_route(
 ) -> RoutingTestOut:
     _check_test_rate(settings, user.id)
     return provider_service.test_routing(model_router, user.id, role)
+
+
+@router.get(
+    "/model-routing",
+    response_model=ModelRoutingOut,
+    summary="All routing configuration: chains per role and the retry/fallback policy",
+)
+def get_model_routing(user: CurrentUser, db: DbSession) -> ModelRoutingOut:
+    return provider_service.get_routing(db, user.id)
+
+
+@router.put(
+    "/model-routing",
+    response_model=ModelRoutingOut,
+    summary="Set several roles' chains and/or the policy in one transaction",
+)
+def set_model_routing(
+    data: ModelRoutingUpdate, user: CurrentUser, db: DbSession
+) -> ModelRoutingOut:
+    return provider_service.set_routing(db, user.id, data)
 
 
 @router.get("/routing-policy", response_model=RoutingPolicyOut, summary="Retry/fallback policy")

@@ -13,6 +13,7 @@ from sqlalchemy import Integer, String, cast, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.ai.adapters.litellm_adapter import known_model_info
 from app.ai.errors import ERROR_HINTS, ProviderError
 from app.ai.recorder import AttemptTarget, circuit_is_open
 from app.ai.registry import PROVIDER_SPECS, AdapterFactory, ProviderSpec, get_spec
@@ -27,7 +28,14 @@ from app.core.crypto import (
 )
 from app.core.errors import AppError, ConflictError, FieldValidationError, NotFoundError
 from app.models import AIModel, AIProvider, ModelRoute, RoutingPolicy, UsageRecord
-from app.models.enums import HealthState, ModelRole, ProviderType, UsageOutcome, UsagePurpose
+from app.models.enums import (
+    HealthState,
+    ModelCapability,
+    ModelRole,
+    ProviderType,
+    UsageOutcome,
+    UsagePurpose,
+)
 from app.schemas.ai import (
     AttemptOut,
     ConnectionTestIn,
@@ -37,7 +45,10 @@ from app.schemas.ai import (
     HealthSummaryOut,
     KeyReplace,
     ModelCreate,
+    ModelCreateForProvider,
     ModelOut,
+    ModelRoutingOut,
+    ModelRoutingUpdate,
     ModelUpdate,
     ProviderCreate,
     ProviderHealthOut,
@@ -91,6 +102,30 @@ def _route_roles(db: Session, owner_id: uuid.UUID) -> dict[uuid.UUID, list[Model
     return out
 
 
+def model_capabilities(model: AIModel) -> list[ModelCapability]:
+    caps = {ModelCapability(c) for c in model.capabilities or [] if c in ModelCapability}
+    if model.supports_json:
+        caps.add(ModelCapability.JSON)
+    return sorted(caps)
+
+
+def _set_capabilities(model: AIModel, caps: list[ModelCapability]) -> None:
+    model.supports_json = ModelCapability.JSON in caps
+    model.capabilities = sorted(c.value for c in caps if c is not ModelCapability.JSON)
+
+
+def connection_status(provider: AIProvider) -> str:
+    if not provider.enabled:
+        return "disabled"
+    if provider.health_state == HealthState.HEALTHY.value:
+        return "connected"
+    if provider.health_state == HealthState.UNKNOWN.value or (
+        provider.last_tested_at is None and provider.last_success_at is None
+    ):
+        return "not_tested"
+    return "failing"
+
+
 def _model_out(model: AIModel, roles: dict[uuid.UUID, list[ModelRole]]) -> ModelOut:
     return ModelOut(
         id=model.id,
@@ -101,6 +136,7 @@ def _model_out(model: AIModel, roles: dict[uuid.UUID, list[ModelRole]]) -> Model
         input_price_per_mtok=model.input_price_per_mtok,
         output_price_per_mtok=model.output_price_per_mtok,
         supports_json=model.supports_json,
+        capabilities=model_capabilities(model),
         enabled=model.enabled,
         health_state=model.health_state,
         last_error_class=model.last_error_class,
@@ -132,6 +168,7 @@ def _provider_out(
         key_masked=secret_service.mask(secret.last4) if secret else None,
         key_updated_at=(secret.rotated_at or secret.created_at) if secret else None,
         health_state=provider.health_state,
+        connection_status=connection_status(provider),
         consecutive_failures=provider.consecutive_failures,
         last_error_class=provider.last_error_class,
         last_error_message=provider.last_error_message,
@@ -256,7 +293,7 @@ def get_provider(db: Session, owner_id: uuid.UUID, provider_id: uuid.UUID) -> Pr
 
 
 def _new_model(provider: AIProvider, data: ModelCreate) -> AIModel:
-    return AIModel(
+    model = AIModel(
         provider_id=provider.id,
         owner_id=provider.owner_id,
         model_identifier=data.model_identifier,
@@ -265,8 +302,35 @@ def _new_model(provider: AIProvider, data: ModelCreate) -> AIModel:
         input_price_per_mtok=data.input_price_per_mtok,
         output_price_per_mtok=data.output_price_per_mtok,
         supports_json=bool(data.supports_json),
+        capabilities=[],
         enabled=data.enabled if data.enabled is not None else True,
     )
+    if data.capabilities is not None:
+        _set_capabilities(model, data.capabilities)
+    _prefill_from_litellm(provider, model, data)
+    return model
+
+
+def _prefill_from_litellm(provider: AIProvider, model: AIModel, data: ModelCreate) -> None:
+    """Fill fields the user left empty from LiteLLM's model map (FR-LLM-002).
+
+    Hosted providers only: a local/compatible endpoint's model name says nothing reliable
+    about its limits or price. Values stay editable.
+    """
+    spec = get_spec(provider.provider_type)
+    if spec.type is ProviderType.OPENAI_COMPATIBLE:
+        return
+    info = known_model_info(spec.litellm_provider, model.model_identifier)
+    if info is None:
+        return
+    if data.context_window is None:
+        model.context_window = info.context_window
+    if data.input_price_per_mtok is None:
+        model.input_price_per_mtok = info.input_price_per_mtok
+    if data.output_price_per_mtok is None:
+        model.output_price_per_mtok = info.output_price_per_mtok
+    if data.capabilities is None and data.supports_json is None:
+        _set_capabilities(model, [ModelCapability(c) for c in info.capabilities])
 
 
 def create_provider(
@@ -348,6 +412,12 @@ def update_provider(
     db.commit()
     db.refresh(provider)
     return get_provider(db, owner_id, provider.id)
+
+
+def set_provider_enabled(
+    db: Session, owner_id: uuid.UUID, provider_id: uuid.UUID, enabled: bool
+) -> ProviderOut:
+    return update_provider(db, owner_id, provider_id, ProviderUpdate(enabled=enabled))
 
 
 def _roles_using(db: Session, owner_id: uuid.UUID, model_ids: list[uuid.UUID]) -> list[str]:
@@ -468,6 +538,30 @@ def list_models(db: Session, owner_id: uuid.UUID, provider_id: uuid.UUID) -> lis
     return [_model_out(m, roles) for m in provider.models]
 
 
+def list_all_models(
+    db: Session, owner_id: uuid.UUID, provider_id: uuid.UUID | None = None
+) -> list[ModelOut]:
+    """Every model the user configured, across providers (optionally one provider)."""
+    query = (
+        select(AIModel)
+        .join(AIProvider, AIModel.provider_id == AIProvider.id)
+        .where(AIModel.owner_id == owner_id)
+        .order_by(func.lower(AIProvider.display_name), AIModel.model_identifier)
+    )
+    if provider_id is not None:
+        get_owned(db, owner_id, provider_id)  # 404 for another user's provider
+        query = query.where(AIModel.provider_id == provider_id)
+    roles = _route_roles(db, owner_id)
+    return [_model_out(m, roles) for m in db.scalars(query).unique()]
+
+
+def add_model_for_provider(
+    db: Session, owner_id: uuid.UUID, data: ModelCreateForProvider
+) -> ModelOut:
+    fields = data.model_dump(exclude={"provider_id"}, exclude_unset=True)
+    return add_model(db, owner_id, data.provider_id, ModelCreate(**fields))
+
+
 def add_model(
     db: Session, owner_id: uuid.UUID, provider_id: uuid.UUID, data: ModelCreate
 ) -> ModelOut:
@@ -504,8 +598,12 @@ def update_model(
         if v is not None
         or k in {"display_name", "context_window", "input_price_per_mtok", "output_price_per_mtok"}
     }
+    caps = changes.pop("capabilities", None)
     for field, value in changes.items():
         setattr(model, field, value)
+    if caps is not None:
+        _set_capabilities(model, [ModelCapability(c) for c in caps])
+        changes["capabilities"] = caps
     if changes:
         if "enabled" in changes and changes["enabled"]:
             model.circuit_opened_at = None
@@ -598,9 +696,12 @@ def get_routes(db: Session, owner_id: uuid.UUID) -> RoutesOut:
     return RoutesOut(roles=out)
 
 
-def set_route(db: Session, owner_id: uuid.UUID, role: ModelRole, data: RouteUpdate) -> RoutesOut:
+def _apply_route(
+    db: Session, owner_id: uuid.UUID, role: ModelRole, model_ids: list[uuid.UUID]
+) -> None:
+    """Validate and replace one role's chain. Does not commit."""
     models = []
-    for i, model_id in enumerate(data.model_ids):
+    for i, model_id in enumerate(model_ids):
         model = db.scalar(
             select(AIModel).where(AIModel.id == model_id, AIModel.owner_id == owner_id)
         )
@@ -627,8 +728,30 @@ def set_route(db: Session, owner_id: uuid.UUID, role: ModelRole, data: RouteUpda
         None,
         {"role": role.value, "models": [m.model_identifier for m in models]},
     )
+
+
+def set_route(db: Session, owner_id: uuid.UUID, role: ModelRole, data: RouteUpdate) -> RoutesOut:
+    _apply_route(db, owner_id, role, data.model_ids)
     db.commit()
     return get_routes(db, owner_id)
+
+
+def get_routing(db: Session, owner_id: uuid.UUID) -> ModelRoutingOut:
+    return ModelRoutingOut(roles=get_routes(db, owner_id).roles, policy=get_policy(db, owner_id))
+
+
+def set_routing(db: Session, owner_id: uuid.UUID, data: ModelRoutingUpdate) -> ModelRoutingOut:
+    """Apply several chains and/or the policy atomically: all of it, or none of it."""
+    try:
+        for role, model_ids in data.routes.items():
+            _apply_route(db, owner_id, role, model_ids)
+        if data.policy is not None:
+            _apply_policy(db, owner_id, data.policy)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return get_routing(db, owner_id)
 
 
 def get_policy(db: Session, owner_id: uuid.UUID) -> RoutingPolicyOut:
@@ -648,7 +771,8 @@ def get_policy(db: Session, owner_id: uuid.UUID) -> RoutingPolicyOut:
     )
 
 
-def update_policy(db: Session, owner_id: uuid.UUID, data: RoutingPolicyUpdate) -> RoutingPolicyOut:
+def _apply_policy(db: Session, owner_id: uuid.UUID, data: RoutingPolicyUpdate) -> None:
+    """Merge policy changes. Does not commit."""
     current = get_policy(db, owner_id).model_dump()
     changes = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
     current.update(changes)
@@ -660,6 +784,10 @@ def update_policy(db: Session, owner_id: uuid.UUID, data: RoutingPolicyUpdate) -
         for k, v in current.items():
             setattr(row, k, v)
     _audit(db, owner_id, "routing_policy.updated", "routing_policy", None, changes)
+
+
+def update_policy(db: Session, owner_id: uuid.UUID, data: RoutingPolicyUpdate) -> RoutingPolicyOut:
+    _apply_policy(db, owner_id, data)
     db.commit()
     return get_policy(db, owner_id)
 
