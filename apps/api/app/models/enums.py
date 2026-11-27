@@ -39,9 +39,19 @@ class ModelRole(enum.StrEnum):
 
     DEFAULT = "default"
     PLANNER = "planner"
+    RESEARCHER = "researcher"
     EXTRACTOR = "extractor"
     VERIFIER = "verifier"
     SUMMARIZER = "summarizer"
+
+
+class ModelCapability(enum.StrEnum):
+    """What a model can do. 'json' mirrors ai_models.supports_json (the router uses it)."""
+
+    JSON = "json"
+    VISION = "vision"
+    TOOLS = "tools"
+    REASONING = "reasoning"
 
 
 class UsageOutcome(enum.StrEnum):

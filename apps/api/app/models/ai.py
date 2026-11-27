@@ -24,7 +24,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -128,6 +128,7 @@ class AIModel(UUIDPrimaryKeyMixin, TimestampMixin, HealthColumnsMixin, Base):
             "output_price_per_mtok IS NULL OR output_price_per_mtok >= 0", name="output_price"
         ),
         CheckConstraint("context_window IS NULL OR context_window > 0", name="context_window"),
+        CheckConstraint("jsonb_typeof(capabilities) = 'array'", name="capabilities"),
     )
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
@@ -144,6 +145,10 @@ class AIModel(UUIDPrimaryKeyMixin, TimestampMixin, HealthColumnsMixin, Base):
     output_price_per_mtok: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     supports_json: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    # Other ModelCapability values (vision, tools, reasoning); 'json' lives in supports_json.
+    capabilities: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # Circuit breaker: opened after repeated transient failures; half-open after a cool-down.
