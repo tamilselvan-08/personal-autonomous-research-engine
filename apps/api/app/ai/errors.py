@@ -107,7 +107,7 @@ _AUTH = re.compile(
 _QUOTA = re.compile(
     r"insufficient[ _-]quota|insufficient[ _-]balance|credit balance is too low|"
     r"billing[ _-]hard[ _-]limit|payment required|out of credits|no credits|"
-    r"exceeded your (?:monthly|current) (?:spending|budget)",
+    r"exceeded your (?:monthly|current) (?:spending|budget|quota)",
     re.I,
 )
 _MODEL_NOT_FOUND = re.compile(

@@ -1,6 +1,9 @@
 """FastAPI application factory."""
 
 import logging
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,11 +24,33 @@ from app.core.middleware import (
 logger = logging.getLogger("pare")
 
 
+def _warm_litellm() -> None:
+    """Import LiteLLM off the request path; it takes several seconds on first import."""
+    from app.ai.adapters.litellm_adapter import load_litellm
+
+    try:
+        load_litellm()
+        logger.info("AI provider client ready")
+    except Exception:  # noqa: BLE001 - the first AI call will retry the import and report it
+        logger.exception("Could not load the AI provider client")
+
+
+def _lifespan(settings: Settings):  # type: ignore[no-untyped-def]
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if settings.environment != "test":
+            threading.Thread(target=_warm_litellm, name="litellm-warmup", daemon=True).start()
+        yield
+
+    return lifespan
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
 
     app = FastAPI(
+        lifespan=_lifespan(settings),
         title="PARE API",
         version=APP_VERSION,
         description=(
