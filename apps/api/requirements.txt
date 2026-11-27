@@ -11,3 +11,6 @@ bcrypt==5.0.0
 PyJWT==2.15.0
 cryptography==50.0.2
 httpx==0.28.1
+# LLM provider calls (PRD C5). openai is imported directly for its client type.
+litellm==1.111.0
+openai==3.60.0

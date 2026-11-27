@@ -16,6 +16,8 @@ dependencies = [
     "PyJWT>=2.15,<3",
     "cryptography>=50,<51",
     "httpx>=0.28,<1",
+    "litellm>=1.111,<2",
+    "openai>=3.60,<4",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+filterwarnings = [
+    # Raised by pydantic for TypedDicts inside LiteLLM itself when it is imported.
+    "ignore:Items? .* using the `ReadOnly` qualifier:UserWarning",
+]
 
 [tool.ruff]
 line-length = 100
