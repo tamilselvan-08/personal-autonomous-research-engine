@@ -2,7 +2,7 @@
 
 PARE turns a research question written in plain language into a reviewed plan, then collects, verifies and organises the answer from public sources, with a source for every value.
 
-**This release covers Phases 1–2 of [the PRD](docs/PRD.md):** accounts, projects, research-task management, the dashboard, settings and health monitoring, and **AI provider management** — encrypted API keys, connection tests, models, primary/fallback routing, health and usage ([details](docs/AI_PROVIDERS.md)). Research planning, web research and browser automation are **not implemented yet**; their screens are labelled *Coming soon* and have no controls.
+**This release covers Phases 1–2 of [the PRD](docs/PRD.md):** accounts, projects, research-task management, the dashboard, settings and health monitoring, and **AI provider management** — encrypted API keys, connection tests, models, primary/fallback routing per task role, health and usage, with provider calls made through LiteLLM ([details](docs/AI_PROVIDERS.md), [architecture](docs/ARCHITECTURE.md)). Research planning, web research and browser automation are **not implemented yet**; their screens are labelled *Coming soon* and have no controls.
 
 | | |
 |---|---|
@@ -170,6 +170,7 @@ pare/
 │       └── types/                 API types mirroring backend schemas
 ├── infrastructure/docker/         Dockerfiles for api and web
 ├── docs/PRD.md                    product requirements (source of truth)
+├── docs/ARCHITECTURE.md           how the system fits together
 ├── docs/AI_PROVIDERS.md           provider architecture, routing, security, key rotation
 ├── tools/stub-llm/                OpenAI-compatible stub server for manual testing without keys
 ├── scripts/                       setup-env, start, stop, doctor (PowerShell) + setup-env.sh
@@ -197,13 +198,13 @@ pare/
 | Projects | `GET/POST /projects`, `GET/PATCH/DELETE /projects/{id}` (`?detach_tasks=true` to delete a project that has tasks) |
 | Research tasks | `GET/POST /tasks` (search `q`, filter `status` (repeatable) and `project_id`, `sort`, pagination), `GET/PATCH/DELETE /tasks/{id}`, `GET /tasks/{id}/status`, `GET /tasks/stats`, `GET /tasks/recent-activity` |
 | Settings | `GET /settings` — version, environment, database version and migration revision, feature availability |
-| AI providers | `GET /providers/types`, `GET/POST /providers`, `GET/PATCH/DELETE /providers/{id}`, `PUT/DELETE /providers/{id}/key`, `POST /providers/{id}/test`, `GET /providers/{id}/available-models`, `GET/POST /providers/{id}/models`, `PATCH/DELETE /models/{id}`, `GET /model-routes`, `PUT /model-routes/{role}`, `POST /model-routes/{role}/test`, `GET/PUT /routing-policy`, `GET /providers/health`, `GET /usage`, `GET /usage/records` — see [docs/AI_PROVIDERS.md](docs/AI_PROVIDERS.md) |
+| AI providers | `GET /providers/types`, `GET/POST /providers`, `GET/PUT/PATCH/DELETE /providers/{id}`, `POST /providers/{id}/enable`, `POST /providers/{id}/disable`, `PUT/DELETE /providers/{id}/key`, `POST /providers/{id}/test`, `GET /providers/{id}/available-models`, `GET/POST /models`, `GET/POST /providers/{id}/models`, `PUT/PATCH/DELETE /models/{id}`, `GET/PUT /model-routing`, `GET /model-routes`, `PUT /model-routes/{role}`, `POST /model-routes/{role}/test`, `GET/PUT /routing-policy`, `GET /providers/health`, `GET /usage`, `GET /usage/records` — see [docs/AI_PROVIDERS.md](docs/AI_PROVIDERS.md) |
 
 All errors use one envelope: `{"error": {"code", "message", "details", "request_id"}}`.
 
 **Database tables:** `users`, `projects`, `research_tasks`, `audit_events`, and for AI providers `secrets`, `ai_providers`, `ai_models`, `model_routes`, `ai_routing_policies`, `usage_records` (plus `alembic_version`). UUID keys, timezone-aware timestamps, foreign keys with explicit delete rules, case-insensitive unique email and per-user unique project names, and indexes for the list queries.
 
-**Web screens:** sign in / create account, dashboard (real counts, recent tasks, recent activity, empty state), research list (search, status/project filters, sort, pagination), new task, task detail, edit draft, delete with confirmation, projects list/create/edit/delete, project detail, history (completed/failed/cancelled tasks), settings (theme, backend and database status, system information), AI Providers (add/edit/enable/disable/delete providers, write-only masked keys, models with provider model discovery, connection tests, primary + ordered fallback chain per role, retry/fallback policy, routing test with per-attempt detail, health and usage), and Browser Manager (*Coming soon*). Light and dark themes; responsive with a mobile menu.
+**Web screens:** sign in / create account, dashboard (real counts, recent tasks, recent activity, empty state), research list (search, status/project filters, sort, pagination), new task, task detail, edit draft, delete with confirmation, projects list/create/edit/delete, project detail, history (completed/failed/cancelled tasks), settings (theme, backend and database status, system information), AI Providers (add/edit/enable/disable/delete providers, write-only masked keys, models with provider model discovery and capabilities (prefilled from LiteLLM for known models), connection tests, primary + ordered fallback chain per role (planner, researcher, extractor, verifier, summarizer, or the default chain), retry/fallback policy, routing test with per-attempt detail, health and usage), and Browser Manager (*Coming soon*). Light and dark themes; responsive with a mobile menu.
 
 ### Security in this release
 
@@ -255,6 +256,7 @@ All errors use one envelope: `{"error": {"code", "message", "details", "request_
 - AI provider adapters are tested against mocked provider responses; **none has yet been verified against a live provider API** (run `tests/test_live_providers.py` with your keys — see `docs/AI_PROVIDERS.md` §7).
 - Budgets and spending caps (PRD §17.3) are not enforced yet; usage cost is an estimate and only for models with prices entered.
 - Connection-test rate limiting is in-memory (per API process), like the login limiter.
+- LiteLLM adds about 200 MB of memory to the API process and takes several seconds to import; the API loads it in the background at startup, so the first AI call right after a restart can wait for it.
 - Task statuses beyond `draft` can't be reached through the UI yet; the full state machine exists in `app/domain/task_state.py` for the next phases.
 - The login rate limiter is in-memory, which is correct for the single API process used locally; multi-process deployments need a shared store.
 - No password change or "sign out everywhere" UI yet (the `token_version` column already supports revocation).

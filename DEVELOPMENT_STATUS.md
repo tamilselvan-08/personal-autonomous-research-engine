@@ -1,11 +1,11 @@
 # PARE — Development Status
 
-_Last updated: 2026-11-25_
+_Last updated: 2026-11-26_
 
 | Phase (PRD §26) | Status |
 |---|---|
 | 1. Foundation (base application) | **Done** — committed as the recovery point `39e8cb3` |
-| 2. AI provider management | **Done**, with open verification items below |
+| 2. AI provider management | **Done** (Development Prompt 02 applied 2026-11-26), with open verification items below |
 | 3. Research planning | Not started — do not begin until instructed |
 | 4–7 | Not started |
 
@@ -13,7 +13,32 @@ _Last updated: 2026-11-25_
 
 ## Phase 2 — AI Provider Management
 
-### What was built
+### Development Prompt 02 changes (2026-11-26)
+
+- **LiteLLM** now makes every provider completion call (PRD C5). LiteLLM's retries are
+  disabled on every call and its Router is not used; PARE's `ModelRouter` remains the only
+  component that retries or falls back. PARE's own HTTP client is passed on every LiteLLM
+  route (no redirects, per-call timeout). Model discovery stays as direct read-only calls.
+- Findings while switching, each now covered by a test: LiteLLM's default OpenAI client
+  retried twice on its own (3 HTTP requests per call); LiteLLM followed redirects and re-sent
+  the key; it silently ignores an HTTP client of the wrong type for a route (and one test
+  call reached a real provider with a fake key before this was found — tests now block real
+  provider hosts); its Gemini route ignored the timeout; it truncates long error bodies.
+- New **`researcher`** role (migration `0003`), model **`capabilities`**, provider
+  **`connection_status`**, and **prefill** of context window / prices / capabilities from
+  LiteLLM's model map for known hosted models.
+- New endpoints alongside the existing ones: `PUT /providers/{id}`,
+  `POST /providers/{id}/enable|disable`, `GET/POST /models`, `PUT /models/{id}`,
+  `GET/PUT /model-routing` (atomic multi-role update).
+- Tests no longer read `apps/api/.env` (it can hold a real database URL).
+- Alembic reads `DATABASE_URL` from `apps/api/.env` when it isn't in the environment.
+- `docs/ARCHITECTURE.md` added; `docs/AI_PROVIDERS.md` updated.
+
+**Cost:** LiteLLM adds ~200 MB per API process (measured 75 → 273 MB) and a slow import
+(~15–19 s on the development machine), so the API imports it in a background thread at
+startup. It fits the 512 MB API container with one worker.
+
+### What was built (Phase 2, 2026-11-25)
 
 - **Provider layer** (`apps/api/app/ai/`): error taxonomy and single retry/fallback decision
   table, three protocol adapters (OpenAI-compatible, Anthropic Messages, Gemini), provider
@@ -39,7 +64,18 @@ _Last updated: 2026-11-25_
 - **Tooling**: `tools/stub-llm/stub_llm.py` — OpenAI-compatible stub with healthy and failing
   routes for manual testing without keys.
 
-### Verification performed (2026-11-25, Windows 11, Python 3.13, Node 22, PostgreSQL 15)
+### Verification performed — Prompt 02 (2026-11-26)
+
+| Check | Result |
+|---|---|
+| Backend tests (`pytest --cov=app`) | **302 passed**, 18 skipped (opt-in live checks), coverage 93 % |
+| LiteLLM guarantees (every provider type) | one HTTP request per call on 503/429/500/timeout; PARE's client used; redirects not followed; keys only in headers |
+| Migration `0003` up/down (incl. rollback with researcher data) | pass |
+| `ruff check` / `ruff format --check` | clean |
+| Frontend `typecheck`, `lint`, `vitest` (28 tests), `next build` | all pass |
+| Browser, against the stub server through LiteLLM | routing test: retry, retry, fallback, success; connection tests made exactly 1 HTTP request each; Researcher role in the picker; `gpt-4o-mini` prefilled as "128k context · JSON · Tools · Vision" without any call to OpenAI |
+
+### Verification performed — Phase 2 (2026-11-25, Windows 11, Python 3.13, Node 22, PostgreSQL 15)
 
 | Check | Result |
 |---|---|
@@ -54,7 +90,7 @@ Tests ran against a throwaway local PostgreSQL 15 cluster (CI uses PostgreSQL 16
 
 ### Not yet verified — do these before treating Phase 2 as fully validated
 
-- [ ] **Live provider calls.** No adapter has been called against a real provider API. Run
+- [ ] **Live provider calls.** No provider has been called through LiteLLM with a real key. Run
       `tests/test_live_providers.py` with real keys (at least OpenAI, Anthropic, Gemini per
       FR-LLM-024), then set `verification="live"` for passing types in `app/ai/registry.py`
       and record model + date here.
