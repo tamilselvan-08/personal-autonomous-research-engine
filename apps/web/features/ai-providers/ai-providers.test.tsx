@@ -10,10 +10,17 @@ import {
   validateProviderForm,
   type ProviderFormValues,
 } from "@/features/ai-providers/add-provider-dialog";
-import { formatCost, formatMs, formatPercent, healthMeta } from "@/features/ai-providers/meta";
+import {
+  ROLE_META,
+  formatCost,
+  formatMs,
+  formatPercent,
+  formatTokens,
+  healthMeta,
+} from "@/features/ai-providers/meta";
 import { ProviderCard } from "@/features/ai-providers/provider-card";
 import { moveItem } from "@/features/ai-providers/routing-card";
-import type { AIProvider, ProviderTypeInfo } from "@/types/api";
+import { MODEL_ROLES, type AIProvider, type ProviderTypeInfo } from "@/types/api";
 
 const OPENAI: ProviderTypeInfo = {
   type: "openai",
@@ -147,6 +154,7 @@ const PROVIDER: AIProvider = {
   key_masked: "••••7890",
   key_updated_at: "2026-11-25T00:00:00Z",
   health_state: "invalid_credentials",
+  connection_status: "failing",
   consecutive_failures: 0,
   last_error_class: "auth",
   last_error_message: "Incorrect API key provided",
@@ -160,10 +168,11 @@ const PROVIDER: AIProvider = {
       provider_id: "p1",
       model_identifier: "gpt-4o-mini",
       display_name: null,
-      context_window: null,
+      context_window: 128000,
       input_price_per_mtok: null,
       output_price_per_mtok: null,
-      supports_json: false,
+      supports_json: true,
+      capabilities: ["json", "vision"],
       enabled: true,
       health_state: "unknown",
       last_error_class: null,
@@ -194,6 +203,7 @@ describe("ProviderCard", () => {
     expect(screen.getByText("Key rejected")).toBeInTheDocument();
     expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument();
     expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.getByText("128k context · JSON · Vision")).toBeInTheDocument();
   });
 });
 
@@ -211,5 +221,13 @@ describe("helpers", () => {
     expect(formatMs(42.4)).toBe("42 ms");
     expect(formatPercent(0.6667)).toBe("67%");
     expect(healthMeta("nonsense").label).toBe("Not tested");
+    expect(formatTokens(128000)).toBe("128k");
+    expect(formatTokens(1048576)).toBe("1M");
+    expect(formatTokens(512)).toBe("512");
+  });
+
+  it("labels every task role, including researcher", () => {
+    expect(MODEL_ROLES).toEqual(["default", "planner", "researcher", "extractor", "verifier", "summarizer"]);
+    for (const role of MODEL_ROLES) expect(ROLE_META[role].label).toBeTruthy();
   });
 });

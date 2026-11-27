@@ -151,8 +151,20 @@ export const PROVIDER_TYPES = [
 ] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
-export const MODEL_ROLES = ["default", "planner", "extractor", "verifier", "summarizer"] as const;
+export const MODEL_ROLES = [
+  "default",
+  "planner",
+  "researcher",
+  "extractor",
+  "verifier",
+  "summarizer",
+] as const;
 export type ModelRole = (typeof MODEL_ROLES)[number];
+
+export const MODEL_CAPABILITIES = ["json", "vision", "tools", "reasoning"] as const;
+export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
+
+export type ConnectionStatus = "connected" | "failing" | "not_tested" | "disabled";
 
 export type HealthState =
   | "unknown"
@@ -191,6 +203,7 @@ export interface AIModel {
   input_price_per_mtok: string | null;
   output_price_per_mtok: string | null;
   supports_json: boolean;
+  capabilities: ModelCapability[];
   enabled: boolean;
   health_state: HealthState;
   last_error_class: string | null;
@@ -215,6 +228,7 @@ export interface AIProvider {
   key_masked: string | null;
   key_updated_at: string | null;
   health_state: HealthState;
+  connection_status: ConnectionStatus;
   consecutive_failures: number;
   last_error_class: string | null;
   last_error_message: string | null;
@@ -234,6 +248,7 @@ export interface ModelInput {
   input_price_per_mtok?: string | null;
   output_price_per_mtok?: string | null;
   supports_json?: boolean;
+  capabilities?: ModelCapability[];
   enabled?: boolean;
 }
 

@@ -34,7 +34,14 @@ import {
   useUpdateModel,
   useUpdateProvider,
 } from "@/features/ai-providers/hooks";
-import { ERROR_CLASS_LABELS, ROLE_META, formatMs, healthMeta } from "@/features/ai-providers/meta";
+import {
+  CAPABILITY_LABELS,
+  ERROR_CLASS_LABELS,
+  ROLE_META,
+  formatMs,
+  formatTokens,
+  healthMeta,
+} from "@/features/ai-providers/meta";
 import { api } from "@/lib/api";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { formatRelative } from "@/lib/utils";
@@ -220,6 +227,16 @@ function ModelRow({
             </Badge>
           ))}
         </div>
+        {model.capabilities.length || model.context_window ? (
+          <p className="text-[12px] text-muted-foreground">
+            {[
+              model.context_window ? `${formatTokens(model.context_window)} context` : null,
+              ...model.capabilities.map((c) => CAPABILITY_LABELS[c]),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : null}
         {model.last_error_message && model.health_state !== "healthy" ? (
           <p className="truncate text-[12px] text-muted-foreground" title={model.last_error_message}>
             {model.last_error_message}
