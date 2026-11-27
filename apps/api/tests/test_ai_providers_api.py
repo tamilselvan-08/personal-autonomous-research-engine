@@ -26,8 +26,8 @@ def http_mock(app):  # type: ignore[no-untyped-def]
         state["requests"].append(request)
         return state["handler"](request)
 
-    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
-    app.dependency_overrides[get_adapter_factory] = lambda: build_adapter_factory(client)
+    transport = httpx.MockTransport(handler)
+    app.dependency_overrides[get_adapter_factory] = lambda: build_adapter_factory(transport)
     yield state
     app.dependency_overrides.clear()
 
@@ -40,6 +40,18 @@ def openai_ok(request: httpx.Request) -> httpx.Response:
             "usage": {"prompt_tokens": 8, "completion_tokens": 1},
         },
     )
+
+
+def anthropic_ok_body() -> dict:
+    return {
+        "id": "msg_test",
+        "type": "message",
+        "role": "assistant",
+        "model": "model-b",
+        "content": [{"type": "text", "text": "OK"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 8, "output_tokens": 1},
+    }
 
 
 def _create(client, **overrides) -> dict:  # type: ignore[no-untyped-def]
@@ -453,7 +465,7 @@ def test_routing_test_endpoint_reports_fallback(auth_client, http_mock) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openai.com":
             return httpx.Response(401, json={"error": {"message": "bad key"}})
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "OK"}], "usage": {}})
+        return httpx.Response(200, json=anthropic_ok_body())
 
     http_mock["handler"] = handler
     a = add_provider(auth_client, "OpenAI", "model-a")

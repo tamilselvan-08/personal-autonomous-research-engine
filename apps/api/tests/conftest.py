@@ -6,6 +6,7 @@ migrated with Alembic once per session, and truncated between tests.
 
 import os
 import secrets
+import socket
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -33,6 +34,42 @@ from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from alembic import command  # noqa: E402
+from app.core.config import Settings  # noqa: E402
+
+# Tests must never read a developer's apps/api/.env: it can hold a real database URL and
+# real secrets, and would make results depend on the machine.
+Settings.model_config["env_file"] = None
+
+# Real provider hosts. No automated test may reach them (only the opt-in live checks).
+_PROVIDER_HOSTS = (
+    ".openai.com",
+    ".anthropic.com",
+    "googleapis.com",
+    ".deepseek.com",
+    ".x.ai",
+    ".mistral.ai",
+)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _block_provider_network() -> Iterator[None]:
+    """Fail fast if any code path bypasses the mocked transport and goes to a provider."""
+    if os.environ.get("PARE_LIVE_TESTS") == "1":
+        yield
+        return
+    real = socket.getaddrinfo
+
+    def guarded(host, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if isinstance(host, str) and host.lower().rstrip(".").endswith(_PROVIDER_HOSTS):
+            raise OSError(f"tests must not contact real provider hosts ({host})")
+        return real(host, *args, **kwargs)
+
+    socket.getaddrinfo = guarded  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = real  # type: ignore[assignment]
+
 
 API_ROOT = Path(__file__).resolve().parents[1]
 TABLES = [

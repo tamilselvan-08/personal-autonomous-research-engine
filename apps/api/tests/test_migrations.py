@@ -90,3 +90,35 @@ def test_constraints_reject_bad_data(scratch_url: str) -> None:
                 conn.execute(text(bad), {"u": uid})
     finally:
         engine.dispose()
+
+
+def test_0003_downgrade_keeps_researcher_usage_history(scratch_url: str) -> None:
+    """Rolling back 0003 relabels 'researcher' usage as 'default' instead of failing."""
+    cfg = alembic_config(scratch_url)
+    command.upgrade(cfg, "head")
+    engine = create_engine(scratch_url)
+    try:
+        with engine.begin() as conn:
+            uid = conn.execute(
+                text(
+                    "INSERT INTO users (id, email, display_name, password_hash) "
+                    "VALUES (gen_random_uuid(), 'm@example.com', 'M', 'x') RETURNING id"
+                )
+            ).scalar()
+            conn.execute(
+                text(
+                    "INSERT INTO usage_records (id, owner_id, provider_type, provider_name, "
+                    "model_identifier, role, purpose, call_id, attempt, outcome, latency_ms) "
+                    "VALUES (gen_random_uuid(), :u, 'openai', 'P', 'm', 'researcher', "
+                    "'completion', gen_random_uuid(), 1, 'success', 5)"
+                ),
+                {"u": uid},
+            )
+        command.downgrade(cfg, "0002")
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT role FROM usage_records")).scalar() == "default"
+            cols = {c["name"] for c in inspect(conn).get_columns("ai_models")}
+            assert "capabilities" not in cols
+        command.upgrade(cfg, "head")
+    finally:
+        engine.dispose()
